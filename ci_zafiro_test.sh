@@ -1,15 +1,20 @@
 #!/bin/bash
 mkdir -p shots; APK=$(find z -name '*.apk' -path '*debug*' | head -1); echo "TEST_APK $APK"
-adb install -r -t "$APK" 2>&1 | tail -3 || echo INSTALL_FAILED
-PKG=$(/usr/local/lib/android/sdk/build-tools/$(ls /usr/local/lib/android/sdk/build-tools | tail -1)/aapt dump badging "$APK" | sed -n "s/package: name='\([^']*\)'.*/\1/p")
-echo "PKG $PKG"; adb shell pm list packages | grep "$PKG"
+BT=/usr/local/lib/android/sdk/build-tools/$(ls /usr/local/lib/android/sdk/build-tools | tail -1)
+adb install -r -t "$APK" 2>&1 | tail -2
+PKG=$($BT/aapt dump badging "$APK" | sed -n "s/package: name='\([^']*\)'.*/\1/p")
+echo "LAUNCHABLE: $($BT/aapt dump badging "$APK" | grep -E 'launchable-activity' | sed "s/.*name='\([^']*\)'.*/\1/" | tr '\n' ' ')"
+ACT=$($BT/aapt dump badging "$APK" | grep launchable-activity | sed "s/.*name='\([^']*\)'.*/\1/" | grep -vi leakcanary | head -1)
+echo "MAIN_ACT $ACT"
+# grant overlay + notifications so the app is not blocked (no accessibility, no real keys)
+adb shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS 2>&1 | head -1
 adb logcat -c
-adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 2>&1 | tail -2
-sleep 15; adb exec-out screencap -p > shots/launch1.png
-adb shell dumpsys window | grep mCurrentFocus
-echo "LAUNCH_FOCUS_OK=$(adb shell dumpsys window | grep mCurrentFocus | grep -c "$PKG")"
-adb shell uiautomator dump /sdcard/u.xml >/dev/null 2>&1; adb pull /sdcard/u.xml shots/u1.xml >/dev/null 2>&1
-echo "UI_TEXTS: $(grep -o 'text="[^"]\+"' shots/u1.xml | head -40 | tr '\n' ' ')"
-echo MEMINFO_BEGIN; adb shell dumpsys meminfo "$PKG" | grep -E "TOTAL|Java Heap|Native Heap" | head -5; echo MEMINFO_END
-echo FATAL_BEGIN; adb logcat -d | grep -B2 -A12 "FATAL EXCEPTION" | head -50; echo FATAL_END
-adb logcat -d -s AndroidRuntime:E | head -20
+adb shell am start -n "$PKG/$ACT" 2>&1 | tail -2
+sleep 20; adb exec-out screencap -p > shots/main1.png
+echo "FOCUS: $(adb shell dumpsys window | grep mCurrentFocus)"
+dump(){ adb shell uiautomator dump /sdcard/u.xml >/dev/null 2>&1; adb pull /sdcard/u.xml shots/$1.xml >/dev/null 2>&1; echo "UI_$1: $(grep -o 'text="[^"]\+"' shots/$1.xml | head -50 | tr '\n' ' ')"; echo "DESC_$1: $(grep -o 'content-desc="[^"]\+"' shots/$1.xml | head -30 | tr '\n' ' ')"; }
+dump main1
+echo MEMINFO_MAIN_BEGIN; adb shell dumpsys meminfo "$PKG" | grep -E "TOTAL PSS|TOTAL RSS|Java Heap:|Native Heap:" | head -4; echo MEMINFO_MAIN_END
+adb shell input swipe 540 1500 540 600 300; sleep 2; adb exec-out screencap -p > shots/main2.png; dump main2
+echo FATAL_BEGIN; adb logcat -d | grep -A8 "FATAL EXCEPTION" | head -60; echo FATAL_END
+echo PROCS: $(adb shell ps -A | grep "$PKG" | awk '{print $NF" rss="$6}' | tr '\n' ' ')
