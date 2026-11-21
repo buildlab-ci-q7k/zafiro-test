@@ -28,6 +28,12 @@ jobs:
           chmod +x gradlew
           ./gradlew --no-daemon :app:assembleDebug -x lint 2>&1 | tail -150 || true
           find . -name '*.apk' | xargs ls -l
+      - name: okia core inventory and unit tests
+        working-directory: z
+        run: |
+          echo OKIA_FILES_BEGIN; find libs/okia -name '*.kt' | xargs wc -l | sort -n | tail -60; echo OKIA_FILES_END
+          cat libs/okia/consumer-rules.pro | head -20; ls docs | head -30
+          ./gradlew --no-daemon :libs:okia:testDebugUnitTest -x lint 2>&1 | tail -25 || true
       - name: Pick APK and size
         run: |
           APK=$(find z -name '*.apk' -path '*debug*' | head -1)
